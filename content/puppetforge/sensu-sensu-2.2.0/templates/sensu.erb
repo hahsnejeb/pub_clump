@@ -1,0 +1,15 @@
+EMBEDDED_RUBY=<%= scope.lookupvar("sensu::use_embedded_ruby") %>
+LOG_LEVEL=<%= scope.lookupvar("sensu::log_level") %>
+<% if ![:undef, nil].include?(scope.lookupvar("sensu::rubyopt")) -%>
+RUBYOPT="<%= scope.lookupvar("sensu::rubyopt") %>"
+<% end -%>
+<% if ![:undef, nil].include?(scope.lookupvar("sensu::gem_path")) -%>
+GEM_PATH="<%= scope.lookupvar("sensu::gem_path") %>"
+<% end -%>
+<% if scope.lookupvar("sensu::deregister_on_stop") -%>
+CLIENT_DEREGISTER_ON_STOP=true
+CLIENT_DEREGISTER_HANDLER="<%= scope.lookupvar("sensu::deregister_handler") %>"
+<% end -%>
+SERVICE_MAX_WAIT="<%= scope.lookupvar("sensu::init_stop_max_wait") %>"
+<% path = scope.lookupvar("sensu::path") -%>
+PATH=<%= [:undef, nil].include?(path) ? "$PATH" : path %>

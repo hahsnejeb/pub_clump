@@ -1,0 +1,19 @@
+127.0.0.1   	localhost localhost.localdomain localhost4 localhost4.localdomain4
+192.168.1.2	clump.hahsnejeb.co.uk 		clump
+192.168.122.11	sensu.hahsnejeb.co.uk		sensu
+192.168.122.12	jenkins.hahsnejeb.co.uk		jenkins
+192.168.122.13	rcdevs.hahsnejeb.co.uk		rcdevs
+192.168.122.14	rhel7b.hahsnejeb.co.uk		rhel7b
+192.168.122.15	ptest.hahsnejeb.co.uk		ptest
+192.168.122.16	web2.hahsnejeb.co.uk		web2
+192.168.122.17	web3.hahsnejeb.co.uk		web3
+192.168.122.18	web4.hahsnejeb.co.uk		web4
+192.168.122.19	web5.hahsnejeb.co.uk		web5
+192.168.122.20	web6.hahsnejeb.co.uk		web6
+# UCL - Remote Desktop
+# create a tunnel to desktop through gateway
+# ssh -C -L 3389:128.41.2.8:3389 cceahah@socrates-a
+# rdp to localhost - whci takes it through the tunnel onto dest
+# xfreerdp -u bejenshah  127.0.0.1:3389
+144.82.110.1	socrates-a.ucl.ac.uk		socrates-a
+128.41.2.8	DESKTOP-A9R3K35.ad.ucl.ac.uk	DESKTOP-A9R3K35

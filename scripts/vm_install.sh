@@ -1,0 +1,185 @@
+#!/bin/bash
+
+USAGE=$(echo -e "USAGE: `basename $0` -b <build> (content|provision|pxe) \
+-v <version (5/6/7)> -e <env> [ -d <desc> ] [ -t <title> ] -i <ip> \
+[ -r <ram> ] [ -p <proc> ] <host> ")
+
+################################################################################
+# Parameters								       #
+################################################################################
+while getopts 'b:v:i:e:d:t:p:r:' c
+  do
+    case $c in
+      i) ip=$OPTARG ;;		
+      b) build=$OPTARG ;;
+      v) version=$OPTARG ;;
+      e) env=$OPTARG ;;
+      d) desc=$OPTARG ;;
+      t) title=$OPTARG ;;
+      p) proc=$OPTARG ;;
+      r) ram=$OPTARG ;;
+      *) echo ${USAGE}; exit ;;
+    esac
+  done
+shift `expr $OPTIND - 1`
+name=$1
+
+################################################################################
+# Check parameters							       #
+################################################################################
+
+if [ -z ${name} ] || [ -z ${build} ] || [ -z ${version} ] || [ -z ${ip} ]
+  then echo ${USAGE}; exit; fi
+if [ "${version}" -ne 5 ] && [ "${version}" -ne 6 ] && [ "${version}" -ne 7 ]
+  then echo ${USAGE}; echo "Version must be either 5/6/7"; exit; fi
+if [ "${env}" != dev ] && [ "${env}" != prod ]
+  then echo ${USAGE}; echo "Env must be either \"dev\" or \"prod\""; exit; fi
+
+################################################################################
+# Output current VM status						       #
+################################################################################
+
+echo "Current Configured VMs:"
+virsh list --all --title
+#echo "Continue? [y]"
+#read continue
+#if [ ${continue} != "y" ]; then echo "Exiting.."; exit; fi
+
+################################################################################
+# Get OS Version							       #
+################################################################################
+
+osvariant=${version}
+if     [ "${version}" -eq 6 ]; then version=68 
+  elif [ "${version}" -eq 7 ]; then version=73
+  elif [ "${version}" -eq 5 ]; then version=57
+  fi
+
+################################################################################
+# Get Processor and Memory
+################################################################################
+
+if [ -z ${proc} ]; then proc=1; fi
+if [ -z ${ram} ]; then ram=512; fi
+if [ ${osvariant} -eq 7 ]; then ram=1024; fi
+
+################################################################################
+# Get Host Description
+################################################################################
+
+if [ -z ${desc} ]; then desc=base; fi
+
+################################################################################
+# Get IP and MAC							       #
+################################################################################
+
+echo "Add entry to /etc/hosts..."
+#vim /etc/hosts
+/bin/cp -f /etc/hosts /var/www/html/pub/clump/post/hosts
+/bin/cp -f /etc/hosts /etc/puppet/environments/dev/modules/base/files/hosts
+ip=`grep ${name} /etc/hosts|awk '{print $1}'`
+if [[ -z ${ip} ]]
+then echo "Unable to find IP Address for ${name}."; echo "${USAGE}"; exit; fi
+mac=$(echo ${ip}|cut -c 13,14)
+mac="52:54:00:00:00:${mac}"
+
+################################################################################
+# Define content host - Need to register against satellite post-install	       #
+################################################################################
+
+content() {
+# Create Kickstart
+sed -i /^"${name}"/d /root/.ssh/known_hosts
+cd /var/www/html/pub/clump/ks-cfg
+ks=${name}.hahsnejeb.co.uk.ks.cfg
+rm -f ${ks}
+cp rhel${version}.hahsnejeb.co.uk.ks.cfg ${ks}
+sed -i "s/IPADDR/${ip}/" ${ks}
+sed -i "s/HOSTNAME/${name}/g" ${ks}
+sed -i "s/ENV-/${env}-/g" ${ks}
+sed -i "s/VERSION/${version}/g" ${ks}
+
+# Get variables (better than sourcing kernel and from /proc/cmdline?)
+buildcfg=/var/www/html/pub/clump/ks-cfg/build-${name}.cfg
+echo "name=${name}" > ${buildcfg}
+echo "hostgroup=${env}-rhel${version}-${desc}" >> ${buildcfg}
+echo "environment=${env}_rhel${version}" >> ${buildcfg}
+echo "build_type=${build}" >> ${buildcfg}
+echo "Created Kickstart: ${ks}"
+
+#
+virt-install -n ${name} --ram ${ram} --vcpus 1 \
+--virt-type kvm --watchdog action=none \
+--network network=default --mac=${mac} --nographics \
+-l http://192.168.122.1/pub/clump/content/rhel${version} \
+--extra-args "ip=${ip} netmask=255.255.255.0 gateway=192.168.122.1 \
+hostname=${name}.hahsnejeb.co.uk \
+ks=http://192.168.122.1/pub/clump/ks-cfg/${ks} \
+auto text console=tty1 console=ttyS0,115200" \
+--os-variant rhel${osvariant} --disk size=8,\
+path=/var/lib/libvirt/images/${name}.img --autostart
+virsh desc --title ${name} ${title}_${ip}
+}
+
+################################################################################
+# Provision content host through PXE on Foreman			  	       #
+# Need to create profile on Katello first				       #
+################################################################################
+
+pxe () {
+# create profile on katello first
+hammer -u admin host create --name ${name} \
+--organization hahsnejeb --location "Default Location" \
+--hostgroup ${env}-rhel${version}-${desc} \
+--interface "mac=${mac},identifier=eth0,ip=${ip}" \
+--environment ${env} --partition-table "Kickstart default"
+
+#
+virt-install -n ${name} --ram ${ram} --vcpus 1 --autostart \
+--location http://192.168.122.1/pub/clump/content/rhel${version} \
+--os-type=linux --os-variant=rhel${osvariant} \
+--disk size=8,path=/var/lib/libvirt/images/${name}.img \
+--boot hd,network --mac=${mac} --network network=default --nographics \
+--extra-args "auto text console=tty1 console=ttyS0,115200 \
+ks=http://192.168.122.1/unattended/provision?static=yes \
+ksdevice=bootif network kssendmac ip=${ip} netmask=255.255.255.0 \
+gateway=192.168.122.1 dns=192.168.1.254" 
+virsh desc --title ${name} ${title}_${ip}
+}
+
+################################################################################
+# Provision a system through Foreman & ISO image			       #
+################################################################################
+
+provision() {
+rm -rf /tmp/${name}.iso
+hammer -u admin host create --ip ${ip} --mac ${mac} \
+--hostgroup ${env}-rhel${version}-${desc} \
+--location "Default Location" --organization hahsnejeb --name ${name}
+foreman-rake --trace bootdisk:generate:host NAME=${name}.hahsnejeb.co.uk \
+OUTPUT=/tmp/${name}.iso
+virt-install -n ${name} --ram ${ram} --vcpus 1 --autostart \
+--network network=default --mac=${mac} --cdrom=/tmp/${name}.iso \
+--os-variant rhel${osvariant} --disk size=8,\
+path=/var/lib/libvirt/images/${name}.img
+virsh desc --title ${name} ${title}_${ip}
+}
+
+################################################################################
+# Main Instruction							       #
+################################################################################
+if [ ${build} == "content" ] || [ ${build} == "provision" ] \
+  || [ ${build} == "pxe" ]
+  then 
+    clear;echo -e "###########################\nBuilding Host..."
+    echo -e "Name: ${name}\nIP: ${ip}\nMAC: ${mac}\nPROCS: ${proc}\nRAM: ${ram}\
+    \nType: ${build}\nTitle: $title\
+    \nHost Group: ${env}-rhel${version}-${desc}\
+    \nEnvironment: ${env}\nDesc: ${desc}\n###########################"
+    ${build}
+else
+    echo "Build Type not found"
+    echo ${USAGE}
+    exit
+fi
+################################################################################
